@@ -132,10 +132,10 @@ function Export-GSSheet {
             }
             else {
                 if (!$contentType) {
-                    $contentType = $Array[0].PSObject.TypeNames[0]
+                    $contentType = $Array[0].GetType().BaseType.Name
                 }
                 $finalArray = @()
-                if ($contentType -eq 'System.String' -or $contentType -like "System.Int*") {
+                if ($contentType -eq 'ValueType') {
                     $Append = $true
                     foreach ($item in $Array) {
                         $finalArray += $([pscustomobject]@{Value = $item})
