@@ -65,45 +65,56 @@ function Export-GSSheet {
         [parameter(Mandatory = $true,Position = 0,ParameterSetName = "UseExistingValue")]
         [String]
         $SpreadsheetId,
+
         [parameter(Mandatory = $false,Position = 0,ParameterSetName = "CreateNewSheetArray")]
         [parameter(Mandatory = $false,Position = 0,ParameterSetName = "CreateNewSheetValue")]
         [String]
         $NewSheetTitle,
+
         [parameter(Mandatory = $true,Position = 1,ValueFromPipeline = $true,ParameterSetName = "UseExistingArray")]
         [parameter(Mandatory = $true,Position = 1,ValueFromPipeline = $true,ParameterSetName = "CreateNewSheetArray")]
         [object[]]
         $Array,
+
         [parameter(Mandatory = $true,Position = 1,ParameterSetName = "UseExistingValue")]
         [parameter(Mandatory = $true,Position = 1,ParameterSetName = "CreateNewSheetValue")]
         [string]
         $Value,
+
         [parameter(Mandatory = $false)]
         [String]
         $SheetName,
+
         [parameter(Mandatory = $false,ParameterSetName = "UseExistingArray")]
         [parameter(Mandatory = $false,ParameterSetName = "CreateNewSheetArray")]
         [ValidateSet('Standard','Horizontal')]
         [String]
         $Style = "Standard",
+
         [parameter(Mandatory = $false)]
         [ValidateNotNullOrEmpty()]
         [Alias('SpecifyRange')]
         [string]
         $Range,
+
         [parameter(Mandatory = $false)]
         [switch]
         $Append,
+
         [parameter(Mandatory = $false,ValueFromPipelineByPropertyName = $true)]
         [Alias('Owner','PrimaryEmail','UserKey','Mail')]
         [string]
         $User = $Script:PSGSuite.AdminEmail,
+
         [parameter(Mandatory = $false)]
         [ValidateSet("INPUT_VALUE_OPTION_UNSPECIFIED","RAW","USER_ENTERED")]
         [string]
         $ValueInputOption = "RAW",
+
         [parameter(Mandatory = $false)]
         [Switch]
         $IncludeValuesInResponse,
+
         [parameter(Mandatory = $false)]
         [Alias('Open')]
         [Switch]
@@ -127,35 +138,44 @@ function Export-GSSheet {
     Process {
         try {
             if ($Value) {
+                # Exporting a single value
                 $finalArray = $([pscustomobject]@{Value = "$Value"})
                 $Append = $true
             }
             else {
+                # Exporting an array of values or an object
                 if (!$contentType) {
+                    # This section only runs on the first iteration over the pipeline
                     $contentType = $Array[0].GetType().BaseType.Name
                 }
                 $finalArray = @()
                 if ($contentType -eq 'ValueType') {
+                    # Use Append mode if an array or value is provided instead of an object
                     $Append = $true
                     foreach ($item in $Array) {
+                        # Add the values to $finalArray as an object
                         $finalArray += $([pscustomobject]@{Value = $item})
                     }
                 }
                 else {
+                    # If an object is provided add the values directly
                     foreach ($item in $Array) {
                         $finalArray += $item
                     }
                 }
             }
             if (!$Append) {
+                # Get the object headers and add them as values
                 $propArray = New-Object 'System.Collections.Generic.List[Object]'
                 $finalArray[0].PSObject.Properties.Name | ForEach-Object {
                     $propArray.Add($_)
                 }
                 $values.Add([System.Collections.Generic.IList[Object]]$propArray)
+                # Set append so that we don't add headers for every iteration
                 $Append = $true
             }
             foreach ($object in $finalArray) {
+                # Add each object/value in the finalArray to the values object
                 $valueArray = New-Object 'System.Collections.Generic.List[Object]'
                 $object.PSobject.Properties.Value | ForEach-Object {
                     $valueArray.Add($_)
