@@ -206,71 +206,104 @@ function Export-GSSheet {
                 $sheet = Get-GSSheetInfo -SpreadsheetId $SpreadsheetId -User $User -Verbose:$false
                 $SpreadsheetUrl = $sheet.SpreadsheetUrl
             }
-  
+            if ($SheetName) {
+                if ($Range -like "'*'!*") {
+                    throw "SpecifyRange formatting error! When using the SheetName parameter, please exclude the SheetName when formatting the SpecifyRange value (i.e. 'A1:Z1000')"
+                }
+                elseif ($Range) {
+                    $Range = "'$($SheetName)'!$Range"
+                }
+                else {
+                    $Range = "$SheetName"
+                }
+            }
+
+            # Determine if we need to add columns/rows to the end of the sheet (default is 26/1000)
+            $columnDiff = $values[0].Count - $sheet.Sheets.Properties.GridProperties.ColumnCount
+            $rowDiff = $values.Count - $sheet.Sheets.Properties.GridProperties.RowCount
+            
+            if ($rowDiff -gt 0 -or $columnDiff -gt 0) {
+                # Create a generic list of request objects
+                $requestList = New-Object 'System.Collections.Generic.List[Google.Apis.Sheets.v4.Data.Request]'
+                
+                if ($rowDiff -gt 0) {
+                    $appendData = [Google.Apis.Sheets.v4.Data.Request]@{ 
+                        AppendDimension = [Google.Apis.Sheets.v4.Data.AppendDimensionRequest]@{
+                            Dimension = 'ROWS'
+                            Length = $rowDiff
+                            SheetId = $sheet.Sheets.Properties.SheetId
+                        }
+                    }
+                    $requestList.Add($appendData)
+                }
+
+                if ($columnDiff -gt 0) {
+                    $appendData = [Google.Apis.Sheets.v4.Data.Request]@{ 
+                        AppendDimension = [Google.Apis.Sheets.v4.Data.AppendDimensionRequest]@{
+                            Dimension = 'COLUMNS'
+                            Length = $columnDiff
+                            SheetId = $sheet.Sheets.Properties.SheetId
+                        }
+                    }
+                    $requestList.Add($appendData)
+                }
+
+                # Create the batchupdate request object and execute the request
+                $appendRequestObj = [Google.Apis.Sheets.v4.Data.BatchUpdateSpreadsheetRequest]@{
+                    Requests = $requestList
+                }
+
+                $appendRequest = $service.Spreadsheets.BatchUpdate($appendRequestObj, $SpreadsheetId)
+                $appendRequest.Execute() | Out-Null
+            }
+
+
             # Split the data into 9 MB chunks (max is 10 MB, give some buffer room)
             $currentValueObject = New-Object 'System.Collections.Generic.List[System.Collections.Generic.IList[Object]]'
             $valuesLength = 0
             $valuesMaxIndex = $values.Count - 1
+            $startRow = 1
+            $endRow = 0
+            $columnMax = Convert-A1Value $values[0].Count
             foreach ($row in $values) {
-                $rowLength = 0
-                
-                foreach ($value in $row) {
-                    $rowLength += $value.Length
+                $valueArray = New-Object 'System.Collections.Generic.List[Object]'
+                $row | ForEach-Object {
+                    $valuesLength += $_.Length
+                    $valueArray.Add($_)
                 }
-                
-                # Don't use += to avoid recalculating
-                $newLength = $valuesLength + $rowLength
+                $currentValueObject.Add([System.Collections.Generic.IList[Object]]$valueArray)
+                $endRow ++
 
-                if ($newLength -gt 9437184 -or $values.IndexOf($row) -eq $valuesMaxIndex) {
-                    # Adjust the range to account for splitting the data
-                    if ($SheetName) {
-                        if ($Range -like "'*'!*") {
-                            throw "SpecifyRange formatting error! When using the SheetName parameter, please exclude the SheetName when formatting the SpecifyRange value (i.e. 'A1:Z1000')"
-                        }
-                        elseif ($Range) {
-                            if ($Range -like '*:*') {
-                                $split = $Range.Split(':')
-                                #
-                            } else {
+                if ($valuesLength -gt 9437184 -or $values.IndexOf($row) -eq $valuesMaxIndex) {
+                    # Add to the sheet for each 9 MB chunk or at the end of the value array
+                    $Range = "'${SheetName}'!A${startRow}:$columnMax$endRow"
+                    
+                    Write-Verbose $Range
 
-                            }
-                            $Range = "'$($SheetName)'!$Range"
-                        }
-                        else {
-                            $Range = "$SheetName"
-                        }
-                    }
-
-                    # Perform a batch update for each 9 MB (or less) data chunk
-                    $bodyData = (New-Object 'Google.Apis.Sheets.v4.Data.ValueRange' -Property @{
+                    # Perform an  update for each 9 MB (or less) data chunk
+                    $bodyData = [Google.Apis.Sheets.v4.Data.ValueRange]@{
                         Range = $Range
                         MajorDimension = "$(if($Style -eq 'Horizontal'){'COLUMNS'}else{'ROWS'})"
                         Values = [System.Collections.Generic.IList[System.Collections.Generic.IList[Object]]]$currentValueObject
-                    })
-                    $body = New-Object 'Google.Apis.Sheets.v4.Data.BatchUpdateValuesRequest'
-                    $body.ValueInputOption = $ValueInputOption
-                    $body.IncludeValuesInResponse = $IncludeValuesInResponse
-                    $body.Data = [Google.Apis.Sheets.v4.Data.ValueRange[]]$bodyData
+                    }
+                    $body = [Google.Apis.Sheets.v4.Data.BatchUpdateValuesRequest]@{
+                        ValueInputOption = $ValueInputOption
+                        IncludeValuesInResponse = $IncludeValuesInResponse
+                        Data = [Google.Apis.Sheets.v4.Data.ValueRange[]]$bodyData
+                    }
+                
                     $request = $service.Spreadsheets.Values.BatchUpdate($body,$SpreadsheetId)
                     Write-Verbose "Updating Range '$Range' on Spreadsheet '$SpreadsheetId' for user '$User'"
                     $request.Execute() | 
                         Add-Member -MemberType NoteProperty -Name 'User' -Value $User -PassThru | 
                         Add-Member -MemberType NoteProperty -Name 'SpreadsheetUrl' -Value $SpreadsheetUrl -PassThru
-
-                    # Reset for future loops
+                    
+                    # Reset for the next iteration
+                    $valuesLength = 0
                     $currentValueObject = New-Object 'System.Collections.Generic.List[System.Collections.Generic.IList[Object]]'
-                    $valuesLength = $rowLength
-                } else {
-                    # Add the current row to the current split if doing so won't put $currentSplit over 9 MB
-                    $valueArray = New-Object 'System.Collections.Generic.List[Object]'
-                    $row | ForEach-Object {
-                        $valueArray.Add($_)
-                    }
-                    $currentValueObject.Add([System.Collections.Generic.IList[Object]]$valueArray)
-                    $valuesLength = $newLength
-                } 
+                    $startRow = $endRow + 1
+                }
             }
-
             if ($Launch) {
                 Write-Verbose "Launching new spreadsheet at $SpreadsheetUrl"
                 Start-Process $SpreadsheetUrl
