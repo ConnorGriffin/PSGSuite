@@ -221,7 +221,7 @@ function Export-GSSheet {
             # Determine if we need to add columns/rows to the end of the sheet (default is 26/1000)
             $columnDiff = $values[0].Count - $sheet.Sheets.Properties.GridProperties.ColumnCount
             $rowDiff = $values.Count - $sheet.Sheets.Properties.GridProperties.RowCount
-            
+
             if ($rowDiff -gt 0 -or $columnDiff -gt 0) {
                 # Create a generic list of request objects
                 $requestList = New-Object 'System.Collections.Generic.List[Google.Apis.Sheets.v4.Data.Request]'
@@ -257,13 +257,11 @@ function Export-GSSheet {
                 $appendRequest.Execute() | Out-Null
             }
 
-
             # Split the data into 9 MB chunks (max is 10 MB, give some buffer room)
             $currentValueObject = New-Object 'System.Collections.Generic.List[System.Collections.Generic.IList[Object]]'
             $valuesLength = 0
             $valuesMaxIndex = $values.Count - 1
             $startRow = 1
-            $endRow = 0
             $columnMax = Convert-A1Value $values[0].Count
             foreach ($row in $values) {
                 $valueArray = New-Object 'System.Collections.Generic.List[Object]'
@@ -272,13 +270,11 @@ function Export-GSSheet {
                     $valueArray.Add($_)
                 }
                 $currentValueObject.Add([System.Collections.Generic.IList[Object]]$valueArray)
-                $endRow ++
-
+                                      
                 if ($valuesLength -gt 9437184 -or $values.IndexOf($row) -eq $valuesMaxIndex) {
+                    $endRow = $values.IndexOf($row) + 1
                     # Add to the sheet for each 9 MB chunk or at the end of the value array
                     $Range = "'${SheetName}'!A${startRow}:$columnMax$endRow"
-                    
-                    Write-Verbose $Range
 
                     # Perform an  update for each 9 MB (or less) data chunk
                     $bodyData = [Google.Apis.Sheets.v4.Data.ValueRange]@{
